@@ -3,8 +3,27 @@ from discord.ext import commands
 import asyncio
 from datetime import datetime, timezone
 
-# Importación de funciones de base de datos
-from core.database import add_bump, get_bumps, get_all_bumps
+# Importación de funciones de base de datos - vamos a crear funciones temporales
+# from core.database import add_bump, get_bumps, get_all_bumps
+
+# Funciones temporales de base de datos (reemplazar con tu implementación real)
+async def add_bump(user_id: int, guild_id: int) -> int:
+    """Función temporal - implementar con tu base de datos real"""
+    # Por ahora solo retorna un número incremental
+    # Aquí deberías conectar con tu base de datos real
+    return 1
+
+async def get_bumps(user_id: int, guild_id: int) -> int:
+    """Función temporal - implementar con tu base de datos real"""
+    # Por ahora retorna 0
+    # Aquí deberías consultar tu base de datos real
+    return 0
+
+async def get_all_bumps(guild_id: int) -> list:
+    """Función temporal - implementar con tu base de datos real"""
+    # Por ahora retorna lista vacía
+    # Aquí deberías consultar tu base de datos real para obtener ranking
+    return []
 
 # Configuración del Bump Tracker
 DISBOARD_BOT_ID = 302050872383242240
@@ -166,10 +185,29 @@ class BumpTracker(commands.Cog):
     # ────────────────────────────────
     # Comando de test
     # ────────────────────────────────
-    @commands.command(name="testbump")
-    @commands.has_permissions(administrator=True)
+    @commands.command(name="testbump", aliases=["tbump", "btest"])
     async def test_bump(self, ctx: commands.Context):
         """Comando de test para simular un bump (solo administradores)"""
+        
+        # Verificar permisos manualmente
+        if not ctx.author.guild_permissions.administrator:
+            embed = discord.Embed(
+                title="❌ Sin permisos",
+                description="Solo los administradores pueden usar este comando.",
+                color=0xff0000
+            )
+            await ctx.send(embed=embed)
+            return
+            
+        # Verificar que estamos en el canal correcto
+        if ctx.channel.id != CHANNEL_ID:
+            embed = discord.Embed(
+                title="⚠️ Canal incorrecto",
+                description=f"Este comando solo funciona en <#{CHANNEL_ID}>",
+                color=0xffa500
+            )
+            await ctx.send(embed=embed)
+            return
         # Simular un bump exitoso
         user_id = ctx.author.id
         guild_id = ctx.guild.id
@@ -227,4 +265,7 @@ class BumpTracker(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
+    # Inicializar base de datos si usas el archivo database.py
+    # from core.database import init_database
+    # await init_database()
     await bot.add_cog(BumpTracker(bot))
