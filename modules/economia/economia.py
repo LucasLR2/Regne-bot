@@ -1,0 +1,2 @@
+class Economia:
+    pass

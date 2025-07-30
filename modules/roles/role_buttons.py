@@ -1,0 +1,2 @@
+class RoleButtons:
+    pass
