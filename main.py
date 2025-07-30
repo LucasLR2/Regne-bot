@@ -27,6 +27,7 @@ MODULES = [
     "modules.bump_tracker.bump_tracker",
     "modules.channel_control.channel_control", 
     "modules.economia.economia",
+    "modules.welcome.welcome",
 ]
 
 # Cargar módulos automáticamente (ASYNC)
