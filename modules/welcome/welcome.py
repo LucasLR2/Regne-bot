@@ -234,7 +234,7 @@ class WelcomeSystem(commands.Cog):
         """Crea imagen usando welcome-general.png como base y añade avatares circulares"""
         try:
             # Cargar imagen base
-            base_image_path = "resources\images\welcome-general.png"  # Asegúrate de que esté en tu directorio
+            base_image_path = "resources/images/welcome-general.png"
             
             try:
                 img = Image.open(base_image_path).convert("RGBA")
