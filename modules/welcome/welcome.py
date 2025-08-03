@@ -198,7 +198,7 @@ class WelcomeSystem(commands.Cog):
         embed = discord.Embed(
             title=f"¡Bienvenido/a {member.display_name}! 🎉",
             description=welcome_text,
-            color=0x00ff00,
+            color=0x00ffff,
             timestamp=datetime.now(timezone.utc)
         )
         
@@ -230,23 +230,110 @@ class WelcomeSystem(commands.Cog):
             embed.set_thumbnail(url=member.display_avatar.url)
             await channel.send(embed=embed)
 
+    async def create_join_visual(self, member):
+        """Crea imagen usando welcome-general.png como base y añade avatares circulares"""
+        try:
+            # Cargar imagen base
+            base_image_path = "resources\images\welcome-general.png"  # Asegúrate de que esté en tu directorio
+            
+            try:
+                img = Image.open(base_image_path).convert("RGBA")
+            except FileNotFoundError:
+                print(f"❌ No se encontró la imagen base: {base_image_path}")
+                return None
+            
+            # Obtener dimensiones de la imagen base
+            width, height = img.size
+            
+            # Descargar avatar del usuario que se une
+            user_avatar_bytes = await self.download_avatar(member)
+            
+            # Descargar logo del servidor
+            server_avatar_bytes = None
+            if member.guild.icon:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(str(member.guild.icon.url)) as response:
+                        if response.status == 200:
+                            server_avatar_bytes = await response.read()
+            
+            # Tamaño de los avatares circulares
+            avatar_size = 65  # Ajusta según el tamaño de tu imagen base
+            
+            # Posiciones (ajusta según tu imagen)
+            # Usuario a la derecha
+            user_x = width - avatar_size - 540
+            user_y = (height - avatar_size) // 2 + 15
+            
+            # Servidor a la izquierda  
+            server_x = 543
+            server_y = (height - avatar_size) // 2 - 50
+            
+            # Función para hacer imagen circular
+            def make_circular(image, size):
+                # Redimensionar
+                image = image.resize((size, size), Image.Resampling.LANCZOS)
+                
+                # Crear máscara circular
+                mask = Image.new("L", (size, size), 0)
+                mask_draw = ImageDraw.Draw(mask)
+                mask_draw.ellipse((0, 0, size, size), fill=255)
+                
+                # Aplicar máscara
+                image.putalpha(mask)
+                return image
+            
+            # Agregar avatar del usuario (derecha)
+            if user_avatar_bytes:
+                user_avatar = Image.open(io.BytesIO(user_avatar_bytes)).convert("RGBA")
+                user_avatar_circular = make_circular(user_avatar, avatar_size)
+                img.paste(user_avatar_circular, (user_x, user_y), user_avatar_circular)
+            
+            # Agregar logo del servidor (izquierda)
+            if server_avatar_bytes:
+                server_avatar = Image.open(io.BytesIO(server_avatar_bytes)).convert("RGBA")
+                server_avatar_circular = make_circular(server_avatar, avatar_size)
+                img.paste(server_avatar_circular, (server_x, server_y), server_avatar_circular)
+            
+            # Convertir a bytes
+            img_bytes = io.BytesIO()
+            img.save(img_bytes, format='PNG')
+            img_bytes.seek(0)
+            
+            return img_bytes
+            
+        except Exception as e:
+            print(f"❌ Error creando visual: {e}")
+            return None
+
     async def send_general_welcome(self, member):
-        """Envía embed simple al canal general"""
+        """Envía mensaje de bienvenida con imagen personalizada"""
         channel = self.bot.get_channel(GENERAL_CHANNEL_ID)
         if not channel:
             print(f"❌ Canal general {GENERAL_CHANNEL_ID} no encontrado")
             return
         
-        embed = discord.Embed(
-            description=f"{member.mention} *se ha unido al servidor, denle la bienvenida*",
-            color=0x5865f2
-        )
+        # Mensaje de bienvenida
+        welcome_text = f"{member.mention} ha llegado al reino, brindémosle una gran bienvenida! 🎉\n"
         
-        try:
+        # Crear imagen visual
+        join_visual = await self.create_join_visual(member)
+        
+        
+        # Crear embed
+        embed = discord.Embed(
+        description=f"{member.mention} ha llegado al reino, brindémosle una gran bienvenida! 🎉",
+        color=0x7289da
+        )
+
+        # Enviar embed con imagen
+        if join_visual:
+            file = discord.File(join_visual, filename="welcome.png")
+            embed.set_image(url="attachment://welcome.png")
+            await channel.send(embed=embed, file=file)
+        else:
+            # Fallback si no se puede crear la imagen
+            embed.description = f"{member.mention} se unió al servidor"
             await channel.send(embed=embed)
-            print(f"✅ Mensaje general enviado para {member.display_name}")
-        except Exception as e:
-            print(f"❌ Error enviando mensaje general: {e}")
 
     @commands.command(name="welcome_test")
     @commands.has_permissions(administrator=True)
