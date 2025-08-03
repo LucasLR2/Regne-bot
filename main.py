@@ -26,6 +26,7 @@ MODULES = [
     "modules.admin.admin",
     "modules.bump_tracker.bump_tracker",
     "modules.channel_control.channel_control", 
+    "modules.economia.resenas",
     "modules.economia.economia",
     "modules.welcome.welcome",
 ]
