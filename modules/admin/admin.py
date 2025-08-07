@@ -3,9 +3,144 @@ from discord.ext import commands
 import asyncio
 from datetime import datetime, timezone
 
+# Configuración del canal de avisos (cambiar por el ID de tu canal)
+AVISOS_CHANNEL_ID = 1400106792821981250
+
+class AvisoModal(discord.ui.Modal, title='📢 Crear Aviso Oficial'):
+    def __init__(self):
+        super().__init__()
+
+    titulo = discord.ui.TextInput(
+        label='📋 Título del Aviso',
+        max_length=256,
+        required=True
+    )
+    
+    descripcion = discord.ui.TextInput(
+        label='📝 Descripción Completa',
+        style=discord.TextStyle.paragraph,
+        max_length=1800,  # Reducido para dejar espacio al formato
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # Obtener el canal de avisos
+        channel_id = AVISOS_CHANNEL_ID
+        if channel_id is None:
+            await interaction.response.send_message(
+                "❌ **Error:** No se ha configurado el canal de avisos. "
+                "Por favor, configura `AVISOS_CHANNEL_ID` en el código.",
+                ephemeral=True
+            )
+            return
+        
+        avisos_channel = interaction.guild.get_channel(channel_id)
+        if avisos_channel is None:
+            await interaction.response.send_message(
+                "❌ **Error:** No se pudo encontrar el canal de avisos configurado.",
+                ephemeral=True
+            )
+            return
+
+        # Crear el embed del aviso con mejor estética
+        embed = discord.Embed(
+            title= f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{self.titulo.value}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            description=f"\n{self.descripcion.value}\n",
+            color=0x5865F2,  # Color azul Discord moderno
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        # Agregar línea decorativa y footer del servidor
+        embed.add_field(
+            name="━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            value="",
+            inline=False
+        )
+        
+        # Footer con información del servidor
+        embed.set_footer(
+            text=f"Aviso oficial de {interaction.guild.name}",
+            icon_url=interaction.guild.icon.url if interaction.guild.icon else None
+        )
+        
+        # Thumbnail del servidor
+        if interaction.guild.icon:
+            embed.set_thumbnail(url=interaction.guild.icon.url)
+
+        try:
+            # Crear mensaje con mejor formato
+            content = f"@everyone\n\n"
+            await avisos_channel.send(content=content, embed=embed)
+            
+            # Responder al usuario que creó el aviso
+            await interaction.response.send_message(
+                f"✅ **Aviso publicado exitosamente** en {avisos_channel.mention}\n"
+                f"🎯 **Título:** {self.titulo.value}",
+                ephemeral=True
+            )
+            
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "❌ **Error:** No tengo permisos para enviar mensajes en el canal de avisos.",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                f"❌ **Error inesperado:** {str(e)}",
+                ephemeral=True
+            )
+
 class AdminCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    # ────────────────────────────────────────────────────────────
+    # Sistema de avisos con formulario modal
+    # ────────────────────────────────────────────────────────────
+    
+    @commands.command(name="aviso")
+    @commands.has_permissions(manage_guild=True)
+    async def crear_aviso(self, ctx):
+        """Abre un formulario para crear un aviso en el canal específico"""
+        # Crear y enviar el modal
+        modal = AvisoModal()
+        
+        # Como los comandos de texto no pueden enviar modals directamente,
+        # creamos un mensaje con un botón que abre el modal
+        class AvisoButton(discord.ui.View):
+            def __init__(self):
+                super().__init__(timeout=60)  # 60 segundos para hacer clic
+            
+            @discord.ui.button(
+                label='Abrir Formulario', 
+                style=discord.ButtonStyle.primary, 
+                emoji='📝'
+            )
+            async def crear_aviso_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+                # Verificar que solo el autor del comando pueda usar el botón
+                if interaction.user != ctx.author:
+                    await interaction.response.send_message(
+                        "❌ Solo el autor del comando puede usar este botón.",
+                        ephemeral=True
+                    )
+                    return
+                
+                await interaction.response.send_modal(AvisoModal())
+        
+        embed = discord.Embed(
+            title="🎯 **Crea un aviso oficial para todo el servidor**",
+            description= "• El aviso se enviará con `@everyone`\n"
+                       "• Aparecerá con el logo del servidor\n\n"
+                       "👇 **Haz clic en el botón para comenzar**",
+            color=0x5865F2
+        )
+        
+        # Agregar thumbnail del servidor si existe
+        if ctx.guild.icon:
+            embed.set_thumbnail(url=ctx.guild.icon.url)
+        
+        view = AvisoButton()
+        await ctx.send(embed=embed, view=view)
 
     # ────────────────────────────────────────────────────────────
     # Comandos de moderación básica
@@ -249,7 +384,8 @@ class AdminCommands(commands.Cog):
             "`!clear` - Limpiar mensajes\n"
             "`!serverinfo` - Info del servidor\n"
             "`!userinfo` - Info de usuario\n"
-            "`!say` - Repetir mensaje",
+            "`!say` - Repetir mensaje\n"
+            "`!aviso` - Crear aviso con formulario",
             inline=False
         )
         await ctx.send(embed=embed)

@@ -2,11 +2,184 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from datetime import timedelta
+import datetime
 from typing import Dict, Set, Optional, List
+
+class ConfirmarTerminar(discord.ui.View):
+    def __init__(self, canal_id: int, usuario_id: int):
+        super().__init__(timeout=60)
+        self.canal_id = canal_id
+        self.usuario_id = usuario_id
+
+    @discord.ui.button(label="✅ Confirmar", style=discord.ButtonStyle.danger)
+    async def confirmar_terminar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Embed de inicio del contador
+        countdown_embed = discord.Embed(
+            title="⏳ Cerrando Reseña",
+            description=f"**La reseña se cerrará automáticamente en 10 segundos.**\n\n"
+                       f"🔸 **Canal:** {interaction.channel.mention}\n"
+                       f"🔸 **Usuario:** <@{self.usuario_id}>\n"
+                       f"🔸 **Cerrado por:** {interaction.user.mention}\n\n"
+                       f"⚠️ **Esta acción:**\n"
+                       f"• Cerrará permanentemente la reseña\n"
+                       f"• Eliminará el canal\n"
+                       f"• Liberará al usuario del sistema\n"
+                       f"• **NO se puede deshacer**",
+            color=0xff6b6b,
+            timestamp=datetime.datetime.now()
+        )
+        countdown_embed.set_footer(text="Cerrando reseña...")
+
+        await interaction.response.edit_message(embed=countdown_embed, view=None)
+        
+        # Countdown de 10 segundos
+        for i in range(10, 0, -1):
+            countdown_embed.description = f"**La reseña se cerrará automáticamente en {i} segundos.**\n\n" \
+                                        f"🔸 **Canal:** {interaction.channel.mention}\n" \
+                                        f"🔸 **Usuario:** <@{self.usuario_id}>\n" \
+                                        f"🔸 **Cerrado por:** {interaction.user.mention}\n\n" \
+                                        f"⚠️ **Esta acción:**\n" \
+                                        f"• Cerrará permanentemente la reseña\n" \
+                                        f"• Eliminará el canal\n" \
+                                        f"• Liberará al usuario del sistema\n" \
+                                        f"• **NO se puede deshacer**"
+            await interaction.edit_original_response(embed=countdown_embed)
+            await discord.utils.sleep_until(discord.utils.utcnow() + timedelta(seconds=1))
+
+        # Liberar usuario del sistema
+        usuario = interaction.guild.get_member(self.usuario_id)
+        bot = interaction.client
+        resenas_cog = bot.get_cog("Resenas")
+        
+        if resenas_cog and usuario:
+            for vista in resenas_cog.vistas_activas.values():
+                if usuario.id in vista.usuarios_con_resena:
+                    vista.usuarios_con_resena.remove(usuario.id)
+                    
+                    class FakeInteraction:
+                        def __init__(self, guild):
+                            self.guild = guild
+                    
+                    fake_interaction = FakeInteraction(interaction.guild)
+                    await vista.actualizar_mensaje_original(fake_interaction)
+
+        # Eliminar el canal
+        await interaction.channel.delete(reason=f"Reseña completada para {usuario.display_name if usuario else 'Usuario desconocido'}")
+
+    @discord.ui.button(label="❌ Cancelar", style=discord.ButtonStyle.secondary)
+    async def cancelar_terminar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cancel_embed = discord.Embed(
+            title="✅ Operación Cancelada",
+            description="El cierre de la reseña ha sido cancelado.",
+            color=0x00ff00
+        )
+        await interaction.response.edit_message(embed=cancel_embed, view=None)
+
+class ReseñasBotones(discord.ui.View):
+    def __init__(self, usuario_id: int, owner_role_id: int):
+        super().__init__(timeout=None)
+        self.usuario_id = usuario_id
+        self.owner_role_id = owner_role_id
+        self.reclamado_por = None
+
+    @discord.ui.button(label="Reclamar", style=discord.ButtonStyle.success, emoji="👋")
+    async def reclamar_resena(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Verificar que tenga el rol de owner
+        if not any(role.id == self.owner_role_id for role in interaction.user.roles):
+            embed_error = discord.Embed(
+                title="❌ Sin permisos",
+                description="Solo los owners pueden reclamar reseñas.",
+                color=0xff0000
+            )
+            await interaction.response.send_message(embed=embed_error, ephemeral=True)
+            return
+
+        # Actualizar botón
+        button.label = f"Reclamado por {interaction.user.display_name}"
+        button.disabled = True
+        button.emoji = "✅"
+        
+        # Guardar quien reclamó
+        self.reclamado_por = interaction.user.id
+        
+        # Crear embed de reclamo
+        embed = discord.Embed(
+            title="👋 Reseña Reclamada",
+            description=f"**{interaction.user.display_name}** se ha hecho cargo de esta reseña.\n\n"
+                       f"🔹 **Staff asignado:** {interaction.user.mention}\n"
+                       f"🔹 **Tiempo:** {datetime.datetime.now().strftime('%d/%m/%Y a las %H:%M')}",
+            color=0xffaa00,
+            timestamp=datetime.datetime.now()
+        )
+        embed.set_thumbnail(url=interaction.user.display_avatar.url)
+        
+        # Primero actualizar el mensaje original con el botón modificado
+        await interaction.response.edit_message(view=self)
+        
+        # Enviar el embed de reclamo
+        await interaction.followup.send(embed=embed)
+        
+        # Enviar mensaje adicional sin embed
+        mensaje_adicional = f"{interaction.user.mention}, un miembro del equipo ya está aquí.\n{interaction.user.mention} se encargará de ayudarte con tu reseña."
+        await interaction.followup.send(mensaje_adicional)
+
+    @discord.ui.button(label="Terminar", style=discord.ButtonStyle.danger, emoji="🔒")
+    async def terminar_resena(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Verificar que tenga el rol de owner
+        if not any(role.id == self.owner_role_id for role in interaction.user.roles):
+            embed_error = discord.Embed(
+                title="❌ Sin permisos",
+                description="Solo los owners pueden terminar reseñas.",
+                color=0xff0000
+            )
+            await interaction.response.send_message(embed=embed_error, ephemeral=True)
+            return
+
+        # Confirmación mejorada
+        confirm_embed = discord.Embed(
+            title="⚠️ Confirmar Cierre de Reseña",
+            description="**¿Estás seguro de que quieres cerrar esta reseña?**\n\n"
+                       f"🔸 **Canal:** {interaction.channel.mention}\n"
+                       f"🔸 **Usuario:** <@{self.usuario_id}>\n"
+                       f"🔸 **Staff:** {interaction.user.mention}\n\n"
+                       f"⚠️ **Esta acción:**\n"
+                       f"• Cerrará permanentemente la reseña\n"
+                       f"• Eliminará el canal en 10 segundos\n"
+                       f"• Liberará al usuario del sistema\n"
+                       f"• **NO se puede deshacer**",
+            color=0xff6b6b
+        )
+        confirm_embed.set_footer(text="Tienes 60 segundos para decidir")
+
+        vista_confirmacion = ConfirmarTerminar(interaction.channel.id, self.usuario_id)
+        await interaction.response.send_message(embed=confirm_embed, view=vista_confirmacion, ephemeral=True)
+
+    @discord.ui.button(label="Llamar", style=discord.ButtonStyle.primary, emoji="📞")
+    async def llamar_staff(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Verificar que alguien haya reclamado la reseña
+        if not self.reclamado_por:
+            embed_error = discord.Embed(
+                title="❌ Nadie ha reclamado",
+                description="Primero alguien debe reclamar esta reseña.",
+                color=0xff0000
+            )
+            await interaction.response.send_message(embed=embed_error, ephemeral=True)
+            return
+
+        # Obtener el usuario que pidió la reseña y el que la reclamó
+        usuario_resena = interaction.guild.get_member(self.usuario_id)
+        staff_reclamo = interaction.guild.get_member(self.reclamado_por)
+        
+        nombre_usuario = usuario_resena.display_name if usuario_resena else "Usuario desconocido"
+        
+        # Mensaje de llamada
+        mensaje = f"{staff_reclamo.mention if staff_reclamo else 'Staff'} **{nombre_usuario}** ya terminó su reseña, es hora de comprobarla."
+        
+        await interaction.response.send_message(mensaje)
 
 class ResenasView(discord.ui.View):
     def __init__(self, resenas_disponibles: int, canal_resenas_id: int, staff_role_ids: List[int], mensaje_id: int = None):
-        super().__init__(timeout=None)  # Sin timeout para que persista
+        super().__init__(timeout=None)
         self.resenas_disponibles = resenas_disponibles
         self.resenas_originales = resenas_disponibles
         self.usuarios_con_resena: Set[int] = set()
@@ -14,7 +187,6 @@ class ResenasView(discord.ui.View):
         self.staff_role_ids = staff_role_ids
         self.mensaje_id = mensaje_id
         
-        # Configurar el botón inicial
         self.actualizar_boton()
     
     def actualizar_boton(self):
@@ -60,18 +232,16 @@ class ResenasView(discord.ui.View):
                 inline=True
             )
             
-            # Obtener el mensaje original y editarlo
             canal = interaction.guild.get_channel(self.canal_resenas_id)
             if canal and self.mensaje_id:
                 try:
                     mensaje = await canal.fetch_message(self.mensaje_id)
                     await mensaje.edit(embed=embed_actualizado, view=self)
                 except discord.NotFound:
-                    # Si no se encuentra el mensaje, enviar uno nuevo
                     nuevo_mensaje = await canal.send(embed=embed_actualizado, view=self)
                     self.mensaje_id = nuevo_mensaje.id
                 except discord.HTTPException:
-                    pass  # Error al editar, continuar sin actualizar
+                    pass
             
         except Exception as e:
             print(f"Error al actualizar mensaje: {e}")
@@ -80,7 +250,6 @@ class ResenasView(discord.ui.View):
     async def solicitar_resena(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Maneja la solicitud de reseña cuando se presiona el botón"""
         
-        # Verificar si el usuario ya tiene una reseña activa
         if interaction.user.id in self.usuarios_con_resena:
             embed = discord.Embed(
                 title="⚠️ Reseña ya solicitada",
@@ -90,7 +259,6 @@ class ResenasView(discord.ui.View):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
-        # Verificar si aún hay cupos disponibles
         if self.resenas_disponibles <= 0:
             embed = discord.Embed(
                 title="❌ Sin cupos disponibles",
@@ -101,20 +269,19 @@ class ResenasView(discord.ui.View):
             return
         
         try:
-            # Defer la respuesta para tener más tiempo
             await interaction.response.defer(ephemeral=True)
             
-            # Crear el canal de ticket
             guild = interaction.guild
-            categoria = None  # Puedes especificar una categoría si quieres
+            categoria = None
             
-            # Configurar permisos del canal
+            # Configurar permisos del canal (sin menciones para el usuario)
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(read_messages=False),
                 interaction.user: discord.PermissionOverwrite(
                     read_messages=True,
                     send_messages=True,
-                    read_message_history=True
+                    read_message_history=True,
+                    mention_everyone=False
                 ),
                 guild.me: discord.PermissionOverwrite(
                     read_messages=True,
@@ -137,7 +304,6 @@ class ResenasView(discord.ui.View):
             
             # Crear el canal
             nombre_canal = f"resenas-{interaction.user.name}".replace(" ", "-").lower()
-            # Limpiar caracteres especiales del nombre
             nombre_canal = ''.join(c for c in nombre_canal if c.isalnum() or c in '-_')
             
             canal_ticket = await guild.create_text_channel(
@@ -147,6 +313,33 @@ class ResenasView(discord.ui.View):
                 topic=f"Reseña para {interaction.user.display_name}"
             )
             
+            # Crear embed de instrucciones
+            embed_instrucciones = discord.Embed(
+                title="📝 Instrucciones para dejar una reseña en Google",
+                description="Para que tu reseña sea válida y profesional, sigue estos dos pasos:",
+                color=0x4285f4
+            )
+            
+            embed_instrucciones.add_field(
+                name="1️⃣ Cambia tu nombre de Google",
+                value="Si usas un nombre como \"xXPepeproXx\", tu reseña puede parecer falsa. Debes usar tu nombre real.\n"
+                      "• Abre este enlace: https://myaccount.google.com/profile\n"
+                      "• Haz clic en tu nombre y cámbialo por uno real (ej: Laura Morales o Javier Ortega).\n"
+                      "• Evita apodos o nombres de videojuegos.\n"
+                      "• Guarda los cambios.",
+                inline=False
+            )
+            
+            embed_instrucciones.add_field(
+                name="2️⃣ Deja la reseña correctamente",
+                value="• Un miembro del equipo te pasará el enlace del sitio en Google Maps.\n"
+                      "• Ábrelo y pulsa \"Escribir una reseña\".\n"
+                      "• Pon 5 estrellas.\n"
+                      "• Escribe un comentario creíble, relacionado con el local (ej: buena atención, limpieza, precio, etc.).\n\n"
+                      "**Tu nombre y reseña serán visibles para todos. Asegúrate de que parezca real y profesional.**",
+                inline=False
+            )
+            
             # Crear menciones de los roles de staff
             menciones_staff = []
             for role_id in self.staff_role_ids:
@@ -154,29 +347,15 @@ class ResenasView(discord.ui.View):
                 if staff_role:
                     menciones_staff.append(staff_role.mention)
             
-            # Enviar mensaje inicial en el canal creado
-            embed_bienvenida = discord.Embed(
-                title="🎫 Canal de Reseña Creado",
-                description="Gracias por tu interés. Por favor, aguarda a que un superior te atienda.",
-                color=0x00ff00
-            )
-            embed_bienvenida.add_field(
-                name="Usuario", 
-                value=interaction.user.mention, 
-                inline=True
-            )
-            embed_bienvenida.add_field(
-                name="Creado", 
-                value=f"<t:{int(interaction.created_at.timestamp())}:R>", 
-                inline=True
-            )
-            
             # Mensaje con menciones
             mensaje_menciones = f"{interaction.user.mention}"
             if menciones_staff:
                 mensaje_menciones += f" {' '.join(menciones_staff)}"
             
-            await canal_ticket.send(mensaje_menciones, embed=embed_bienvenida)
+            # Crear vista con botones para el canal
+            vista_botones = ReseñasBotones(interaction.user.id, self.staff_role_ids[0])  # Usar el primer rol como owner
+            
+            await canal_ticket.send(mensaje_menciones, embed=embed_instrucciones, view=vista_botones)
             
             # Actualizar el estado
             self.resenas_disponibles -= 1
@@ -216,15 +395,13 @@ class ResenasView(discord.ui.View):
 class Resenas(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Almacenar las vistas activas para persistencia durante la sesión
         self.vistas_activas: Dict[int, ResenasView] = {}
         
         # 🔧 CONFIGURACIÓN MANUAL - CAMBIA ESTOS IDs POR LOS DE TU SERVIDOR
         self.CANAL_RESENAS_ID = 1400106793551663190  # ID del canal donde se publican las reseñas
         self.ROL_NOTIFICACION_RESENAS_ID = 1400106792196898891 # ID del rol que se menciona al usuario al publicar reseñas
         self.STAFF_ROLE_IDS = [
-            1400106792280658070,  # ID del primer rol de staff/moderación
-            1400106792196898889   # ID del segundo rol de staff/moderación
+            1400106792280658070,  # ID del primer rol de staff/moderación (OWNER)
         ]
     
     @commands.command(name="resenas")
@@ -246,7 +423,7 @@ class Resenas(commands.Cog):
             await ctx.send(embed=embed_error)
             return
         
-        if num_resenas > 50:  # Límite de seguridad
+        if num_resenas > 50:
             embed_error = discord.Embed(
                 title="❌ Número muy alto",
                 description="Por seguridad, el máximo de reseñas es 50.",
@@ -255,7 +432,6 @@ class Resenas(commands.Cog):
             await ctx.send(embed=embed_error)
             return
         
-        # Obtener el canal de reseñas
         canal_resenas = self.bot.get_channel(self.CANAL_RESENAS_ID)
         if not canal_resenas:
             embed_error = discord.Embed(
@@ -267,14 +443,12 @@ class Resenas(commands.Cog):
             await ctx.send(embed=embed_error)
             return
         
-        # Verificar que los roles existan
         roles_validos = []
         for role_id in self.STAFF_ROLE_IDS:
             role = ctx.guild.get_role(role_id)
             if role:
                 roles_validos.append(role)
         
-        # Confirmar en el canal de administración
         embed_confirmacion = discord.Embed(
             title="✅ Sistema de reseñas iniciado",
             description=f"Se han configurado **{num_resenas}** reseñas disponibles.",
@@ -302,7 +476,6 @@ class Resenas(commands.Cog):
         
         await ctx.send(embed=embed_confirmacion)
         
-        # Crear embed para el canal público
         embed_publico = discord.Embed(
             title="📝 Sistema de Reseñas",
             description=f"Hay **{num_resenas}** reseñas disponibles de **{num_resenas}** totales.",
@@ -319,7 +492,6 @@ class Resenas(commands.Cog):
             inline=True
         )
         
-        # Enviar mensaje al canal público
         rol_notificacion = ctx.guild.get_role(self.ROL_NOTIFICACION_RESENAS_ID)
         mensaje_notificacion = ""
         if rol_notificacion:
@@ -327,19 +499,15 @@ class Resenas(commands.Cog):
 
         mensaje_publico = await canal_resenas.send(mensaje_notificacion, embed=embed_publico)
         
-        # Crear y configurar la vista
         vista_resenas = ResenasView(num_resenas, self.CANAL_RESENAS_ID, self.STAFF_ROLE_IDS, mensaje_publico.id)
         self.vistas_activas[canal_resenas.id] = vista_resenas
         
-        # Editar el mensaje para agregar la vista
         await mensaje_publico.edit(embed=embed_publico, view=vista_resenas)
     
     @commands.command(name="estado_resenas")
     @commands.has_permissions(administrator=True)
     async def estado_resenas(self, ctx):
-        """
-        Muestra el estado actual del sistema de reseñas
-        """
+        """Muestra el estado actual del sistema de reseñas"""
         if not self.vistas_activas:
             embed = discord.Embed(
                 title="📊 Estado del Sistema",
@@ -371,15 +539,9 @@ class Resenas(commands.Cog):
     @commands.command(name="cerrar_resena")
     @commands.has_permissions(manage_channels=True)
     async def cerrar_resena(self, ctx, usuario: discord.Member = None):
-        """
-        Cierra el canal de reseña de un usuario y lo libera del sistema
-        
-        Uso: !cerrar_resena @usuario
-        Si se usa en un canal de reseña, detecta automáticamente al usuario
-        """
+        """Cierra el canal de reseña de un usuario y lo libera del sistema"""
         canal_actual = ctx.channel
         
-        # Si no se especifica usuario, intentar detectar desde el nombre del canal
         if not usuario and canal_actual.name.startswith("resenas-"):
             nombre_usuario = canal_actual.name.replace("resenas-", "")
             for member in ctx.guild.members:
@@ -396,14 +558,12 @@ class Resenas(commands.Cog):
             await ctx.send(embed=embed_error)
             return
         
-        # Liberar al usuario de todas las vistas activas y actualizar mensajes
         usuario_liberado = False
         for vista in self.vistas_activas.values():
             if usuario.id in vista.usuarios_con_resena:
                 vista.usuarios_con_resena.remove(usuario.id)
                 usuario_liberado = True
                 
-                # Crear una interacción falsa para actualizar el mensaje
                 class FakeInteraction:
                     def __init__(self, guild):
                         self.guild = guild
@@ -411,7 +571,6 @@ class Resenas(commands.Cog):
                 fake_interaction = FakeInteraction(ctx.guild)
                 await vista.actualizar_mensaje_original(fake_interaction)
         
-        # Eliminar el canal si estamos en uno de reseñas
         if canal_actual.name.startswith("resenas-"):
             embed_cierre = discord.Embed(
                 title="✅ Reseña completada",
@@ -420,7 +579,6 @@ class Resenas(commands.Cog):
             )
             await ctx.send(embed=embed_cierre)
             
-            # Esperar un poco antes de eliminar el canal
             await discord.utils.sleep_until(discord.utils.utcnow() + timedelta(seconds=3))
             await canal_actual.delete(reason=f"Reseña completada para {usuario.display_name}")
         else:
@@ -441,9 +599,7 @@ class Resenas(commands.Cog):
     @commands.command(name="reset_resenas")
     @commands.has_permissions(administrator=True)
     async def reset_resenas(self, ctx):
-        """
-        Resetea el sistema de reseñas, eliminando todas las vistas activas
-        """
+        """Resetea el sistema de reseñas, eliminando todas las vistas activas"""
         self.vistas_activas.clear()
         
         embed = discord.Embed(
@@ -456,9 +612,7 @@ class Resenas(commands.Cog):
     @commands.command(name="actualizar_resenas")
     @commands.has_permissions(administrator=True)
     async def actualizar_resenas(self, ctx):
-        """
-        Fuerza la actualización de todos los mensajes de reseñas activos
-        """
+        """Fuerza la actualización de todos los mensajes de reseñas activos"""
         if not self.vistas_activas:
             embed = discord.Embed(
                 title="⚠️ Sin sistemas activos",
@@ -491,15 +645,12 @@ class Resenas(commands.Cog):
     @commands.command(name="config_info")
     @commands.has_permissions(administrator=True)
     async def config_info(self, ctx):
-        """
-        Muestra la configuración actual del sistema
-        """
+        """Muestra la configuración actual del sistema"""
         embed = discord.Embed(
             title="⚙️ Configuración del Sistema",
             color=0x0099ff
         )
         
-        # Información del canal
         canal = self.bot.get_channel(self.CANAL_RESENAS_ID)
         embed.add_field(
             name="Canal de reseñas",
@@ -507,7 +658,6 @@ class Resenas(commands.Cog):
             inline=False
         )
         
-        # Información de roles
         roles_info = []
         for role_id in self.STAFF_ROLE_IDS:
             role = ctx.guild.get_role(role_id)

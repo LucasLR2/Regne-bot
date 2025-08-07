@@ -15,8 +15,9 @@ if not TOKEN:
 # Intents (permisos de eventos de Discord)
 import discord
 intents = discord.Intents.default()
-intents.members = True
-intents.message_content = True
+intents.members = True      
+intents.message_content = True   
+intents.invites = True 
 
 # Crear instancia del bot
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -29,6 +30,10 @@ MODULES = [
     "modules.economia.resenas",
     "modules.economia.economia",
     "modules.welcome.welcome",
+    "modules.levels.levels",
+    "modules.invites.invites",
+    "modules.tickets.tickets",
+    "modules.beginning.beginning",
 ]
 
 # Cargar módulos automáticamente (ASYNC)
